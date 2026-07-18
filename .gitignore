@@ -1,0 +1,19 @@
+# 环境变量 / 密钥，切勿提交真实账号密码
+.env
+*.env
+config.local.*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Node
+node_modules/
+
+# 日志/调试文件
+*.log
+task_page_debug.html
+
+# 系统文件
+.DS_Store
