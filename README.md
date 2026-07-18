@@ -7,6 +7,7 @@
 | [`discuz_auto_checkin_ql.py`](./discuz_auto_checkin_ql.py) | Python | 宽带技术网（Discuz! X5.0）任务签到，自动申请"领取猫粮" |
 | [`ql_netease_full_sign.js`](./ql_netease_full_sign.js) | JavaScript (Node) | 网易云音乐完整签到：普通签到 + 云贝签到/任务 + 黑胶乐签 + VIP成长值 |
 | [`tianyiyun.py`](./tianyiyun.py) | Python | 天翼云盘每日签到，领取容量奖励 |
+| [`bilibili_task.py`](./bilibili_task.py) | Python | B站每日任务：观看 + 分享 + 自动投币，助力经验值满级 |
 
 ## ⚠️ 免责声明
 
@@ -115,6 +116,39 @@
 
 ---
 
+## 4. bilibili_task.py — B站每日任务
+
+模拟已登录状态调用 bilibili 官方接口，自动完成每日"观看 + 分享"经验任务，并按设置自动投币。
+
+**功能特性**
+- 登录状态检查 + 账号信息获取（昵称打码显示）
+- 随机抽取一个热门视频用于观看/分享/投币，避免每天固定刷同一个视频
+- 观看、分享任务分别 +5 经验，已完成会自动跳过
+- 可配置每日投币数量（0~5 枚，默认 1 枚最健康，避免硬币被无脑刷空）
+- 多账号并发执行（默认 3 线程），单账号失败不影响其他账号
+- 日志分段 + 图标 + ANSI 颜色，账号昵称/UID 打码处理
+
+**依赖**：`pip install requests --break-system-packages`
+
+**环境变量**
+
+| 变量名 | 必填 | 说明 |
+| --- | --- | --- |
+| `BILI_COOKIE` | 是 | 完整的 bilibili.com Cookie 字符串（需包含 `bili_jct`、`DedeUserID` 等字段），多账号用 `&` 或换行符分隔 |
+| `BILI_TOSS_COIN_COUNT` | 否 | 每日投币数量，0~5，默认 1 |
+
+**获取 Cookie 方式**：浏览器登录 [bilibili.com](https://www.bilibili.com) → F12 → Network 任意请求 → Headers 里复制完整 `Cookie` 字段值。
+
+**定时任务**：`task bilibili_task.py`，建议 cron `15 9 * * *`
+
+**常见问题**
+- 提示"登录失效或接口被拦截"：优先检查 Cookie 是否过期（重新登录浏览器抓一份新的），其次考虑是否触发了风控（更换/静置出口 IP）。
+- 投币任务提示"硬币余额不足"：属正常情况，硬币不够就不会强行投币。
+
+> 本脚本改编自 [Han-cy77/Qinglong_auto](https://github.com/Han-cy77/Qinglong_auto)（MIT License），感谢原作者。相比原版：接入了本仓库统一的 QL `notify` 推送方式（不再需要在脚本里硬编码 Bark URL）、去掉了本地 `logs/` 目录落盘逻辑、修复了多账号按 `&` 分隔在特定情况下失效的问题。
+
+---
+
 ## License
 
-本仓库以 [MIT License](./LICENSE) 开源。天翼云盘脚本部分逻辑参考自 [vistal8/tianyiyun](https://github.com/vistal8/tianyiyun)，网易云脚本参考自 [chaunsin/netease-cloud-music](https://github.com/chaunsin/netease-cloud-music) 与 [NeteaseCloudMusicApiEnhanced/api-enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)，感谢原作者。
+本仓库以 [MIT License](./LICENSE) 开源。天翼云盘脚本部分逻辑参考自 [vistal8/tianyiyun](https://github.com/vistal8/tianyiyun)，网易云脚本参考自 [chaunsin/netease-cloud-music](https://github.com/chaunsin/netease-cloud-music) 与 [NeteaseCloudMusicApiEnhanced/api-enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)，B站脚本改编自 [Han-cy77/Qinglong_auto](https://github.com/Han-cy77/Qinglong_auto)，感谢原作者。
