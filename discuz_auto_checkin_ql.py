@@ -10,9 +10,8 @@ cron: 30 8 * * *
 # 【使用前必读】
 # 1. 只能用于你自己账号的站点，遵守目标站点用户协议。
 # 2. 任务模块（home.php?mod=task）具体的 do= 参数因站点安装的任务插件不同而不同，
-#    我没法访问该站需要登录后才能看到的页面逐一核对，脚本会自动探测任务页面里
-#    的相关链接；如果探测不到，会打印页面片段到日志，你需要抓包确认真实链接后
-#    通过 MANUAL_TASK_URL 环境变量指定。
+#    脚本会自动探测任务页面里的相关链接；如果探测不到，会打印页面片段到日志，
+#    你需要抓包确认真实链接后通过 MANUAL_TASK_URL 环境变量指定。
 # 3. 站点若有验证码/滑块，本脚本无法处理，需要人工介入。
 #
 # 【青龙面板配置步骤】
@@ -26,20 +25,21 @@ cron: 30 8 * * *
 # (4) 定时任务 -> 新建任务，命令填：
 #       task discuz_auto_checkin_ql.py
 #     或直接在脚本管理里点“运行”按钮手动跑一次，看日志输出调试
-# (5) 查看日志：任务日志里能看到本脚本的 print 输出，包括 formhash、
-#     登录返回内容前几百字符、任务链接请求结果等，方便逐步排查。
+# (5) 查看日志：任务日志里能看到本脚本的美化输出，登录、任务申请、
+#     最终汇总都有清晰的分段和图标标识，方便一眼定位问题。
 # ===================================================================
 
 import os
 import re
 import sys
 import json
+import time
 
 try:
     import requests
     from bs4 import BeautifulSoup
 except ImportError:
-    print("[错误] 缺少依赖，请在青龙 '依赖管理 -> pip' 中添加 requests 和 beautifulsoup4")
+    print("❌ 缺少依赖，请在青龙 [依赖管理 -> pip] 中添加 requests 和 beautifulsoup4")
     sys.exit(1)
 
 # 青龙常见的通知模块，本地调试时若不存在会自动跳过，不影响脚本运行
@@ -51,7 +51,7 @@ except Exception:
     HAS_NOTIFY = False
 
     def send(title, content):
-        print(f"[通知-未配置QL notify，仅本地打印]\n{title}\n{content}")
+        print(f"🔕 未配置青龙通知渠道，以下内容仅本地打印：\n{title}\n{content}")
 
 
 BASE_URL = "https://www.chinadsl.net"
@@ -66,6 +66,56 @@ HEADERS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# 日志美化：统一图标 + ANSI 颜色（青龙日志面板支持 ANSI 渲染）
+# ---------------------------------------------------------------------------
+class C:
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    YELLOW = "\033[33m"
+    CYAN = "\033[36m"
+    GRAY = "\033[90m"
+
+
+def log_title(text):
+    print(f"\n{C.BOLD}{C.CYAN}{'━' * 44}{C.RESET}")
+    print(f"{C.BOLD}{C.CYAN}  {text}{C.RESET}")
+    print(f"{C.BOLD}{C.CYAN}{'━' * 44}{C.RESET}")
+
+
+def log_step(icon, text, color=""):
+    print(f"{color}{icon} {text}{C.RESET}")
+
+
+def log_ok(text):
+    log_step("✅", text, C.GREEN)
+
+
+def log_fail(text):
+    log_step("❌", text, C.RED)
+
+
+def log_warn(text):
+    log_step("⚠️ ", text, C.YELLOW)
+
+
+def log_info(text):
+    log_step("ℹ️ ", text, C.CYAN)
+
+
+def log_debug(text):
+    log_step("🔍", text, C.GRAY)
+
+
+def mask_username(name: str) -> str:
+    """日志里对用户名做轻度打码，avoid 完整明文暴露在日志截图里。"""
+    if len(name) <= 2:
+        return name[0] + "*"
+    return name[0] + "*" * (len(name) - 2) + name[-1]
+
+
 def load_accounts():
     """
     从环境变量 CHINADSL_ACCOUNTS 读取账号，JSON 数组格式，例如：
@@ -75,15 +125,15 @@ def load_accounts():
     """
     raw = os.environ.get("CHINADSL_ACCOUNTS", "").strip()
     if not raw:
-        print("[错误] 未检测到环境变量 CHINADSL_ACCOUNTS，请在青龙'环境变量管理'中添加。")
-        print('格式示例：[{"user":"用户名1","pass":"密码1"},{"user":"用户名2","pass":"密码2"}]')
+        log_fail("未检测到环境变量 CHINADSL_ACCOUNTS，请在青龙 [环境变量管理] 中添加。")
+        log_info('格式示例：[{"user":"用户名1","pass":"密码1"},{"user":"用户名2","pass":"密码2"}]')
         sys.exit(1)
 
     try:
         raw_accounts = json.loads(raw)
     except json.JSONDecodeError as e:
-        print(f"[错误] CHINADSL_ACCOUNTS 不是合法的 JSON：{e}")
-        print('请确认格式类似：[{"user":"用户名1","pass":"密码1"}]')
+        log_fail(f"CHINADSL_ACCOUNTS 不是合法的 JSON：{e}")
+        log_info('请确认格式类似：[{"user":"用户名1","pass":"密码1"}]')
         sys.exit(1)
 
     accounts = []
@@ -91,7 +141,7 @@ def load_accounts():
         user = item.get("user", "").strip()
         pwd = item.get("pass", "")
         if not user or not pwd:
-            print(f"[警告] 跳过缺少 user/pass 字段的项：{item}")
+            log_warn(f"跳过缺少 user/pass 字段的项：{item}")
             continue
         accounts.append((user, pwd))
     return accounts
@@ -110,14 +160,14 @@ class DiscuzClient:
         return m.group(1) if m else ""
 
     def login(self, username: str, password: str) -> bool:
+        masked = mask_username(username)
         login_page_url = f"{self.base_url}/member.php?mod=logging&action=login"
         resp = self.session.get(login_page_url, timeout=15)
         resp.encoding = "utf-8"
         formhash = self._get_formhash(resp.text)
-        print(f"[调试] 登录页 formhash = '{formhash}'")
+        log_debug(f"登录页 formhash = '{formhash}'")
         if not formhash:
-            print("[警告] 未解析出 formhash，登录接口可能已变化，"
-                  "请检查登录页 HTML 结构（可打开 task_page_debug 类似方式保存排查）。")
+            log_warn("未解析出 formhash，登录接口可能已变化，请检查登录页 HTML 结构。")
 
         login_action_url = (
             f"{self.base_url}/member.php?mod=logging&action=login"
@@ -135,18 +185,18 @@ class DiscuzClient:
         resp2 = self.session.post(login_action_url, data=data, timeout=15)
         resp2.encoding = "utf-8"
         text = resp2.text
-        print(f"[调试] 登录返回片段: {text[:300]}")
 
         if "欢迎您回来" in text or "succeedhandle" in text or "action=logout" in text:
-            print(f"[成功] 账号 {username} 登录成功。")
+            log_ok(f"账号 {masked} 登录成功")
             return True
 
         check = self.session.get(self.base_url + "/", timeout=15)
         if "action=logout" in check.text or username in check.text:
-            print(f"[成功] 账号 {username} 登录成功（二次检测确认）。")
+            log_ok(f"账号 {masked} 登录成功（二次检测确认）")
             return True
 
-        print(f"[失败] 账号 {username} 登录未成功。")
+        log_fail(f"账号 {masked} 登录失败")
+        log_debug(f"登录接口返回片段：{text[:200]}")
         return False
 
     def do_task_checkin(self, task_view_url: str, manual_task_url: str = "") -> str:
@@ -155,7 +205,7 @@ class DiscuzClient:
             r = self.session.get(manual_task_url, timeout=15)
             r.encoding = "utf-8"
             msg = f"使用手动链接签到，返回：{r.text[:200]}"
-            print(f"[提示] {msg}")
+            log_info(msg)
             return msg
 
         resp = self.session.get(task_view_url, timeout=15)
@@ -163,20 +213,19 @@ class DiscuzClient:
 
         if "需要先登录" in resp.text or "您需要登录后才能继续" in resp.text:
             msg = "访问任务页提示需要登录，登录态未生效"
-            print(f"[失败] {msg}")
+            log_fail(msg)
             return msg
 
         soup = BeautifulSoup(resp.text, "html.parser")
 
         # 情况一：任务按钮处于禁用状态（今日/本周期已完成），class 里带 "taskda"
-        # 典型 HTML： <a ... class="taskbtn taskda" onclick="doane(event);showDialog('2026-7-19 00:00 后可以再次申请')">
         disabled_btn = soup.find("a", class_=re.compile(r"\btaskda\b"))
         if disabled_btn:
             onclick = disabled_btn.get("onclick", "")
             m = re.search(r"showDialog\('([^']+)'\)", onclick)
             next_time = m.group(1) if m else "未知时间"
-            msg = f"任务今日/本周期已完成，需等到 {next_time} 才能再次申请（无需重复操作）"
-            print(f"[提示] {msg}")
+            msg = f"今日/本周期已完成，{next_time}"
+            log_info(msg + "（无需重复操作）")
             return msg
 
         # 情况二：任务按钮可点击（class 只有 "taskbtn"，没有 taskda）
@@ -188,12 +237,11 @@ class DiscuzClient:
             if href and href not in ("javascript:;", "javascript:void(0);", "#"):
                 candidate_links.append(href)
             else:
-                # 链接藏在 onclick 里，尝试提取形如 home.php?mod=task&do=apply&id=1&formhash=xxx 的片段
                 m = re.search(r"(home\.php\?mod=task[^'\"\)]+)", onclick)
                 if m:
                     candidate_links.append(m.group(1).replace("&amp;", "&"))
                 else:
-                    print(f"[调试] 找到可点击的任务按钮，但无法从 onclick 中解析出请求地址：{onclick}")
+                    log_debug(f"找到可点击的任务按钮，但无法从 onclick 解析出请求地址：{onclick}")
 
         # 情况三：兜底，继续按关键词扫描全部链接（兼容其他任务插件写法）
         candidate_keywords = ["do=apply", "do=perform", "do=finish", "do=complete", "do=draw"]
@@ -207,13 +255,12 @@ class DiscuzClient:
             try:
                 with open(debug_path, "w", encoding="utf-8") as f:
                     f.write(resp.text)
-                print(f"[提示] 未自动识别到任务链接，页面已保存到 {debug_path}")
+                log_warn(f"未自动识别到任务链接，页面已保存到 {debug_path}")
             except Exception:
-                print("[提示] 未自动识别到任务链接，且无法写入调试文件，"
-                      "以下是任务页面前 800 字符：")
+                log_warn("未自动识别到任务链接，且无法写入调试文件，以下是任务页面前 800 字符：")
                 print(resp.text[:800])
-            print("请浏览器登录后手动点击'签到/领取'，用 F12->Network 找到真实请求URL，"
-                  "配置到环境变量 MANUAL_TASK_URL 后重新运行。")
+            log_info("请浏览器登录后手动点击签到按钮，用 F12->Network 找到真实请求URL，"
+                     "配置到环境变量 MANUAL_TASK_URL 后重新运行。")
             return "未能自动识别任务提交链接，需要人工抓包确认"
 
         results = []
@@ -225,32 +272,62 @@ class DiscuzClient:
                 full_url = f"{full_url}{sep}formhash={task_page_formhash}"
             r = self.session.get(full_url, timeout=15)
             r.encoding = "utf-8"
-            print(f"[请求] {full_url}")
-            print(f"[返回] {r.text[:300]}")
-            results.append(r.text[:100])
+            log_debug(f"请求任务接口 -> {full_url}")
+
+            msg_soup = BeautifulSoup(r.text, "html.parser")
+            msg_box = msg_soup.find(id="messagetext") or msg_soup.find(
+                "div", class_=re.compile(r"alert_(right|error|info)")
+            )
+            is_error = bool(msg_soup.find("div", class_=re.compile(r"alert_error")))
+            if msg_box:
+                msg_text = msg_box.get_text(strip=True, separator=" ")
+            else:
+                body_start = r.text.find("<body")
+                msg_text = re.sub(r"<[^>]+>", " ", r.text[body_start:body_start + 1200]).strip()
+                msg_text = re.sub(r"\s+", " ", msg_text)
+
+            if is_error:
+                log_fail(f"任务提交返回：{msg_text}")
+            else:
+                log_ok(f"任务提交返回：{msg_text}")
+            results.append(msg_text[:150])
 
         return "; ".join(results)
 
 
 def main():
-    accounts = load_accounts()
-    manual_task_url = os.environ.get("MANUAL_TASK_URL", "").strip()
+    start_ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    log_title(f"🐾 宽带技术网自动签到  {start_ts}")
 
-    summary_lines = []
-    for username, password in accounts:
-        print(f"\n===== 开始处理账号：{username} =====")
+    accounts = load_accounts()
+    log_info(f"共读取到 {len(accounts)} 个账号")
+
+    summary_rows = []
+    for idx, (username, password) in enumerate(accounts, 1):
+        masked = mask_username(username)
+        print(f"\n{C.BOLD}── [{idx}/{len(accounts)}] 账号 {masked} ──{C.RESET}")
         client = DiscuzClient(BASE_URL)
 
         if not client.login(username, password):
-            summary_lines.append(f"[{username}] 登录失败")
+            summary_rows.append((masked, "❌", "登录失败"))
             continue
 
-        result = client.do_task_checkin(TASK_VIEW_URL, manual_task_url)
-        summary_lines.append(f"[{username}] {result}")
+        result = client.do_task_checkin(TASK_VIEW_URL, os.environ.get("MANUAL_TASK_URL", "").strip())
+        icon = "❌" if ("失败" in result or "未能自动识别" in result) else "✅"
+        summary_rows.append((masked, icon, result))
+
+    log_title("📋 执行结果汇总")
+    summary_lines = []
+    for masked, icon, result in summary_rows:
+        line = f"{icon} {masked}：{result}"
+        print(line)
+        summary_lines.append(line)
 
     summary = "\n".join(summary_lines)
-    print(f"\n===== 全部账号处理完毕 =====\n{summary}")
     send("宽带技术网签到结果", summary)
+
+    end_ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"\n{C.GRAY}耗时统计由青龙面板自动记录，结束时间 {end_ts}{C.RESET}")
 
 
 if __name__ == "__main__":
