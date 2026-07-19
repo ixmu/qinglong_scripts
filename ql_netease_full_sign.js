@@ -3,7 +3,7 @@
  * 
  * @description 支持青龙面板的全自动签到脚本
  * @author Your Name
- * @version 1.0.0
+ * @version 1.0.1
  * @license MIT
  * 
  * 功能：
@@ -18,16 +18,6 @@
  * NETEASE_MUSIC_U - MUSIC_U cookie值
  * 
  * cron: 0 9 * * *
- * 
- * 参考项目：
- * - https://github.com/chaunsin/netease-cloud-music
- * - https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced
- * 
- * ⚠️ 免责声明：
- * 1. 本脚本仅供学习交流使用，请勿用于商业用途
- * 2. 使用本脚本造成的任何后果由使用者自行承担
- * 3. 本脚本不存储、不上传任何用户数据
- * 4. 使用前请确认遵守网易云音乐用户服务条款
  */
 
 const https = require('https');
@@ -105,7 +95,7 @@ function request(hostname, path, data = {}) {
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Content-Length': Buffer.byteLength(postData),
-                'Cookie': `MUSIC_U=${MUSIC_U}; os=pc; appver=2.10.6;`,
+                'Cookie': `MUSIC_U=${MUSIC_U}; os=pc; appver=3.0.1.200578;`, // 升级版本号应对 403 审计
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Referer': 'https://music.163.com/',
                 'Origin': 'https://music.163.com'
@@ -201,6 +191,7 @@ async function receiveVipMissionReward(userRewardId, userProgressId) {
         userProgressId: String(userProgressId)
     });
 }
+
 async function main() {
     console.log('🎵 网易云音乐完整签到');
     console.log('时间：' + new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }));
@@ -240,6 +231,10 @@ async function main() {
             console.log(`   ❌ 安卓端签到失败`);
         }
 
+        // 异步等待 2.5 秒，打碎请求节奏，规避高频探测拦截
+        console.log('   ⏳ 保护性延迟中，2.5秒后请求PC端...');
+        await new Promise(resolve => setTimeout(resolve, 2500));
+
         // PC端
         const pcSign = await dailySign(1);
         if (pcSign.code === 200) {
@@ -249,7 +244,7 @@ async function main() {
             console.log('   ⚠️ PC端今日已签到');
             message += '⚠️ PC端已签到\n';
         } else {
-            console.log(`   ❌ PC端签到失败 (${pcSign.code}: ${pcSign.message || pcSign.msg || '未知错误'})`);
+            console.log(`   ❌ PC端签到失败 (${pcSign.code}: ${pcSign.message || pcSign.msg || '网络过载/触发风控'})`);
         }
 
         // 3. 云贝签到
@@ -345,7 +340,6 @@ async function main() {
                 let missionCount = 0;
                 let totalGrowth = 0;
                 for (const mission of missions.data) {
-                    // 检查任务阶段是否可领取 (stageStatus === 100 表示已完成可领取)
                     if (mission.stageProgressDTOS) {
                         for (const stage of mission.stageProgressDTOS) {
                             if (stage.stageStatus === 100 && stage.userRewardId && stage.userProgressId) {
