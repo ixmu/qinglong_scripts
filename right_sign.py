@@ -7,6 +7,10 @@
   接口: POST plugin.php?id=erling_qd:action&action=sign
   参数: formhash=xxx
   响应: JSON {success: bool, message: str}
+
+new Env('恩山论坛签到');
+cron: 30 8 * * *
+
 """
 
 import os, re, json, time
