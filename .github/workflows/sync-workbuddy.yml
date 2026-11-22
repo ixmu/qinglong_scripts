@@ -2,8 +2,8 @@ name: Sync workbuddy_daily.py
 
 on:
   schedule:
-    # 每 6 小时自动同步一次（UTC 时间，北京时间 02/08/14/20 点）
-    - cron: '0 */6 * * *'
+    # 每天凌晨 3 点同步（北京时间 Asia/Shanghai；GitHub cron 只认 UTC，即每天 19:00 UTC）
+    - cron: '0 19 * * *'
   workflow_dispatch:   # 允许在 Actions 页面手动触发同步
   push:
     paths:
