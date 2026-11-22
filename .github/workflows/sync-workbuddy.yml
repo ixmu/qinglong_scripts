@@ -1,4 +1,4 @@
-name: Sync workbuddy_daily.py
+name: Sync workbuddy scripts
 
 on:
   schedule:
@@ -23,35 +23,51 @@ jobs:
     env:
       UPSTREAM_REPO: L0NE-6/WorkBuddy-Daily   # 上游源仓库
       UPSTREAM_BRANCH: main                    # 上游分支
-      TARGET_FILE: workbuddy_daily.py          # 需要同步的文件（仓库根目录）
+      # 需要同步的文件，每行一个（相对上游仓库根目录）
+      TARGET_FILES: |
+        workbuddy_daily.py
+        workbuddy_login.py
+        requirements.txt
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Download upstream file
+      - name: Sync files from upstream
         run: |
           set -euo pipefail
-          url="https://raw.githubusercontent.com/${UPSTREAM_REPO}/${UPSTREAM_BRANCH}/${TARGET_FILE}"
-          echo "正在下载: ${url}"
-          curl -fsSL --retry 3 "${url}" -o /tmp/upstream_file
-          if [ ! -s /tmp/upstream_file ]; then
-            echo "::error::下载到的文件为空，终止同步"
-            exit 1
-          fi
-
-      - name: Commit & push if changed
-        run: |
-          set -euo pipefail
-          if cmp -s /tmp/upstream_file "${TARGET_FILE}"; then
-            echo "${TARGET_FILE} 已是最新，无需更新"
-            exit 0
-          fi
-          cp /tmp/upstream_file "${TARGET_FILE}"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "${TARGET_FILE}"
-          git commit -m "chore: 从 ${UPSTREAM_REPO} 同步 ${TARGET_FILE}"
-          git push
-          echo "已更新 ${TARGET_FILE}"
+          changed=0
+          while IFS= read -r raw || [ -n "$raw" ]; do
+            f="${raw%$'\r'}"                    # 去掉可能的 CR
+            f="$(echo "$f" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            [ -z "$f" ] && continue
+            url="https://raw.githubusercontent.com/${UPSTREAM_REPO}/${UPSTREAM_BRANCH}/${f}"
+            echo "正在下载: ${url}"
+            tmp="$(mktemp)"
+            if ! curl -fsSL --retry 3 "$url" -o "$tmp"; then
+              echo "::error::下载失败: $f"; rm -f "$tmp"; exit 1
+            fi
+            if [ ! -s "$tmp" ]; then
+              echo "::error::下载到的文件为空，终止同步: $f"; rm -f "$tmp"; exit 1
+            fi
+            mkdir -p "$(dirname "$f")"
+            if [ -f "$f" ] && cmp -s "$tmp" "$f"; then
+              echo "$f 已是最新，无需更新"
+            else
+              cp "$tmp" "$f"
+              git add "$f"
+              changed=1
+              echo "已更新 $f"
+            fi
+            rm -f "$tmp"
+          done <<< "$TARGET_FILES"
+          if [ "$changed" -eq 1 ]; then
+            git commit -m "chore: 从 ${UPSTREAM_REPO} 同步 workbuddy 脚本"
+            git push
+            echo "已推送本次同步"
+          else
+            echo "所有文件均为最新，无需提交"
+          fi
