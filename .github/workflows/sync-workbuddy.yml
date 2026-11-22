@@ -1,0 +1,57 @@
+name: Sync workbuddy_daily.py
+
+on:
+  schedule:
+    # 每 6 小时自动同步一次（UTC 时间，北京时间 02/08/14/20 点）
+    - cron: '0 */6 * * *'
+  workflow_dispatch:   # 允许在 Actions 页面手动触发同步
+  push:
+    paths:
+      - '.github/workflows/sync-workbuddy.yml'
+
+# 允许写入仓库内容（提交并推送同步结果）
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-workbuddy
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_REPO: L0NE-6/WorkBuddy-Daily   # 上游源仓库
+      UPSTREAM_BRANCH: main                    # 上游分支
+      TARGET_FILE: workbuddy_daily.py          # 需要同步的文件（仓库根目录）
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download upstream file
+        run: |
+          set -euo pipefail
+          url="https://raw.githubusercontent.com/${UPSTREAM_REPO}/${UPSTREAM_BRANCH}/${TARGET_FILE}"
+          echo "正在下载: ${url}"
+          curl -fsSL --retry 3 "${url}" -o /tmp/upstream_file
+          if [ ! -s /tmp/upstream_file ]; then
+            echo "::error::下载到的文件为空，终止同步"
+            exit 1
+          fi
+
+      - name: Commit & push if changed
+        run: |
+          set -euo pipefail
+          if cmp -s /tmp/upstream_file "${TARGET_FILE}"; then
+            echo "${TARGET_FILE} 已是最新，无需更新"
+            exit 0
+          fi
+          cp /tmp/upstream_file "${TARGET_FILE}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${TARGET_FILE}"
+          git commit -m "chore: 从 ${UPSTREAM_REPO} 同步 ${TARGET_FILE}"
+          git push
+          echo "已更新 ${TARGET_FILE}"
