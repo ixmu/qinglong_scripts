@@ -27,6 +27,8 @@ jobs:
       TARGET_FILES: |
         workbuddy_daily.py
         workbuddy_login.py
+        workbuddy_intl_daily.py
+        workbuddy_intl_login.py
         requirements.txt
     steps:
       - name: Checkout
